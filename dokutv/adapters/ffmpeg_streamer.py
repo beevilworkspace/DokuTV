@@ -63,16 +63,12 @@ class FFmpegStreamerAdapter(StreamerPort):
             available = list(streams.keys())
             logger.info(f"Streamlink: Available qualities: {available}")
 
-            # Select highest quality stream (720p minimum for broadcast quality)
-            for quality in ["best", "1080p", "720p"]:
+            # Select highest quality available stream
+            for quality in ["best", "1080p60", "1080p", "720p60", "720p", "480p", "360p", "worst"]:
                 if quality in streams:
                     direct_url = streams[quality].url
                     logger.info(f"Streamlink: Selected '{quality}' stream.")
                     return direct_url
-
-            # Reject low-quality streams (480p and below) – not suitable for Twitch
-            logger.warning(f"Streamlink: No HD stream (720p+) available for '{youtube_url}'. Skipping.")
-            return None
 
         except ImportError:
             logger.error("Streamlink is not installed! Run: pip install streamlink")

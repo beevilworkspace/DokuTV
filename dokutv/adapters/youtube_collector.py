@@ -39,13 +39,18 @@ class YouTubeCollectorAdapter(ContentCollectorPort):
         selected_order = random.choice(["relevance", "viewCount", "rating"])
         logger.info(f"YouTube API Request: Searching '{query}' with order='{selected_order}'...")
         
-        # Stage 1: Try with Documentary category (ID 35) + long duration
-        video_items = self._youtube_search(query, max_results, selected_order, category_id="35")
+        # Stage 1: Try with Documentary category (ID 35) + CC license
+        video_items = self._youtube_search(query, max_results, selected_order, category_id="35", video_license="creativeCommon")
         
-        # Stage 2: Fallback without category filter (category 35 not available in all regions)
+        # Stage 2: Fallback without category filter, with CC license
         if not video_items:
-            logger.info("No results with Documentary category filter. Retrying without category...")
-            video_items = self._youtube_search(query, max_results, selected_order, category_id=None)
+            logger.info("No results with Documentary category filter. Retrying with CC license without category...")
+            video_items = self._youtube_search(query, max_results, selected_order, category_id=None, video_license="creativeCommon")
+
+        # Stage 3: Fallback without CC license restriction (general search for documentary content)
+        if not video_items:
+            logger.info("No CC-licensed results found. Retrying general search without license filter...")
+            video_items = self._youtube_search(query, max_results, selected_order, category_id=None, video_license=None)
 
         if not video_items:
             logger.warning("No search results returned from YouTube API.")
@@ -68,14 +73,13 @@ class YouTubeCollectorAdapter(ContentCollectorPort):
         random.shuffle(results)
         return results
 
-    def _youtube_search(self, query: str, max_results: int, order: str, category_id: str = None) -> list:
+    def _youtube_search(self, query: str, max_results: int, order: str, category_id: str = None, video_license: str = "creativeCommon") -> list:
         """Execute a single YouTube Data API search request."""
         params = {
             "part": "snippet",
             "q": query,
             "type": "video",
             "videoDuration": "long",
-            "videoLicense": "creativeCommon",
             "videoDefinition": "high",
             "order": order,
             "maxResults": max_results,
@@ -83,22 +87,28 @@ class YouTubeCollectorAdapter(ContentCollectorPort):
         }
         if category_id:
             params["videoCategoryId"] = category_id
+        if video_license:
+            params["videoLicense"] = video_license
 
         search_url = "https://www.googleapis.com/youtube/v3/search?" + urllib.parse.urlencode(params)
         req = urllib.request.Request(search_url, headers={"User-Agent": "DokuTV_EN/1.0"})
-        with urllib.request.urlopen(req) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return data.get("items", [])
+        try:
+            with urllib.request.urlopen(req) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return data.get("items", [])
+        except Exception as e:
+            logger.warning(f"YouTube search attempt failed: {e}")
+            return []
 
     def _get_curated_cc_documentaries(self) -> List[Video]:
         raw_items = [
             {
-                "id": "21X5lGlDOfg",
-                "title": "NASA Apollo 11: Moon Landing Full Official Documentary",
+                "id": "vP4-T0pZlyI",
+                "title": "NASA | Tour of the Moon in 4K",
                 "duration_seconds": 3600,
                 "license": "Public Domain (NASA)",
-                "description": "Official NASA documentary of Apollo 11 lunar landing.",
-                "youtube_url": "https://www.youtube.com/watch?v=21X5lGlDOfg"
+                "description": "Official NASA 4K visualization tour of the Moon.",
+                "youtube_url": "https://www.youtube.com/watch?v=vP4-T0pZlyI"
             },
             {
                 "id": "J34rB7jWshg",

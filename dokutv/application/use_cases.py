@@ -52,19 +52,30 @@ class StreamCurrentSlotUseCase:
         self.streamer_port = streamer_port
         self.twitch_port = twitch_port
 
-    def execute(self, schedule: List[PlaySlot]) -> Dict[str, Any]:
+    def execute(self, schedule: List[PlaySlot], max_retries: int = 5) -> Dict[str, Any]:
         logger.info("StreamCurrentSlotUseCase: Determining active play slot...")
         current_slot = self.schedule_repo_port.get_current_playing_slot(schedule)
         if not current_slot:
             raise ValueError("No playing slot available in schedule.")
 
-        logger.info(f"StreamCurrentSlotUseCase: Playing slot #{current_slot.slot_index} - '{current_slot.title}'")
-        self.twitch_port.update_stream_title(current_slot.title)
-        
-        video_source = current_slot.youtube_url or "sample_doc.mp4"
-        success = self.streamer_port.stream_video(video_source, current_slot.title)
+        start_idx = current_slot.slot_index - 1
+        for offset in range(min(max_retries, len(schedule))):
+            candidate_slot = schedule[(start_idx + offset) % len(schedule)]
+            logger.info(f"StreamCurrentSlotUseCase: Attempting slot #{candidate_slot.slot_index} - '{candidate_slot.title}'")
+            
+            video_source = candidate_slot.youtube_url or "sample_doc.mp4"
+            success = self.streamer_port.stream_video(video_source, candidate_slot.title)
+
+            if success:
+                self.twitch_port.update_stream_title(candidate_slot.title)
+                return {
+                    "current_slot": candidate_slot,
+                    "stream_launched": True,
+                }
+            
+            logger.warning(f"Slot #{candidate_slot.slot_index} ('{candidate_slot.title}') is unplayable. Retrying with next slot...")
 
         return {
             "current_slot": current_slot,
-            "stream_launched": success,
+            "stream_launched": False,
         }
