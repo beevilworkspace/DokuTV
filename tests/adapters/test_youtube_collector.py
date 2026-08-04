@@ -58,7 +58,25 @@ class TestYouTubeCollectorAdapter(unittest.TestCase):
         )
 
         next_vid = adapter.get_next_video(query="documentary", exclude_ids=["vid1"])
+        self.assertIsNotNone(next_vid)
         self.assertEqual(next_vid.id, "vid2")
+
+    def test_collector_adapter_uses_api_when_valid(self):
+        config = YouTubeCollectorConfig(api_key="AIzaSyRealApiKey1234567")
+        mock_api = MagicMock(spec=YouTubeApiClient)
+        mock_api.is_api_key_valid.return_value = True
+        v1 = Video(id="api1", title="API Doc 1", duration_seconds=300, youtube_url="http://api1")
+        mock_api.search_videos.return_value = [v1]
+
+        adapter = YouTubeCollectorAdapter(
+            config=config,
+            api_client=mock_api,
+        )
+
+        videos = adapter.search_cc_documentaries("nature")
+        self.assertEqual(len(videos), 1)
+        self.assertEqual(videos[0].id, "api1")
+        mock_api.search_videos.assert_called_once_with("nature", 30)
 
 
 if __name__ == "__main__":

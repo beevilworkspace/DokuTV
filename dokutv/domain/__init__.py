@@ -10,6 +10,7 @@ from dokutv.domain.topics import (
     TopicProvider,
     get_random_topic,
 )
+from dokutv.domain.services import TwitchTitleFormatter, TitleFormatter
 from dokutv.domain.exceptions import (
     DomainError,
     InvalidVideoError,
@@ -24,6 +25,8 @@ __all__ = [
     "TopicCategory",
     "TopicProvider",
     "get_random_topic",
+    "TwitchTitleFormatter",
+    "TitleFormatter",
     "DomainError",
     "InvalidVideoError",
     "ScheduleError",

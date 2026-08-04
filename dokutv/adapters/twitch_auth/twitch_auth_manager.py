@@ -69,7 +69,10 @@ class TwitchAuthManager:
             self.token_store.clear()
         else:
             self._cached_tokens = TwitchTokens.from_dict(val)
-            self.token_store.save(self._cached_tokens)
+    def invalidate_tokens(self) -> None:
+        """Invalidate in-memory token cache and clear token file on disk."""
+        self._cached_tokens = None
+        self.token_store.clear()
 
     def has_tokens(self) -> bool:
         """Check if tokens have been obtained (initial auth completed)."""

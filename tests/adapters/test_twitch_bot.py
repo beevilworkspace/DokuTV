@@ -1,10 +1,12 @@
+import urllib.error
 import unittest
 from unittest.mock import MagicMock
 
+from dokutv.domain.services import TwitchTitleFormatter
 from dokutv.adapters.twitch_bot import (
     TwitchHelixConfig,
-    TwitchTitleFormatter,
     TwitchHelixAdapter,
+    TwitchHelixClient,
 )
 from dokutv.adapters.twitch_auth import TwitchAuthManager
 
@@ -39,6 +41,26 @@ class TestTwitchBotAdapter(unittest.TestCase):
         result = adapter.update_stream_title("Sample Video")
         self.assertTrue(result)
         mock_auth.get_user_access_token.assert_called_once()
+
+    def test_helix_adapter_http_401_invalidates_tokens(self):
+        config = TwitchHelixConfig(channel_name="TestChannel")
+        mock_auth = MagicMock(spec=TwitchAuthManager)
+        mock_auth.get_user_access_token.return_value = "valid_token"
+        mock_client = MagicMock(spec=TwitchHelixClient)
+        mock_client.get_broadcaster_id.return_value = "12345"
+        mock_client.update_channel_info.side_effect = urllib.error.HTTPError(
+            url="https://api.twitch.tv", code=401, msg="Unauthorized", hdrs={}, fp=None
+        )
+
+        adapter = TwitchHelixAdapter(
+            config=config,
+            auth_manager=mock_auth,
+            client=mock_client,
+        )
+
+        result = adapter.update_stream_title("Sample Video")
+        self.assertFalse(result)
+        mock_auth.invalidate_tokens.assert_called_once()
 
 
 if __name__ == "__main__":

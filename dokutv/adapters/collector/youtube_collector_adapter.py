@@ -1,7 +1,7 @@
 """
 Interface Adapters - YouTube Content Collector.
 Implements ContentCollectorPort.
-Orchestrates YouTube Data API search, video candidate pool, and fallback playlist storage.
+Pure infrastructure adapter fetching video candidates from YouTube API or fallback storage.
 """
 
 import logging
@@ -30,8 +30,6 @@ class YouTubeCollectorAdapter(ContentCollectorPort):
         self.api_client = api_client or YouTubeApiClient(self.config)
         self.fallback_store = fallback_store or FallbackPlaylistStore(self.config.fallback_file)
 
-        self.video_pool: List[Video] = []
-
     @property
     def api_key(self) -> str:
         return self.config.api_key
@@ -45,14 +43,11 @@ class YouTubeCollectorAdapter(ContentCollectorPort):
         exclude_set = self._normalize_exclude_ids(exclude_ids)
         candidates = self.search_cc_documentaries(query=query, max_results=30)
 
-        # Combine fresh candidates + video pool
-        all_candidates = candidates + [v for v in self.video_pool if v not in candidates]
-
-        for video in all_candidates:
+        for video in candidates:
             if video.id not in exclude_set:
                 return video
 
-        # Fallback to curated list if all candidates are excluded
+        # Fallback to curated list if all search candidates are excluded
         curated = self.fallback_store.load_curated_videos()
         for video in curated:
             if video.id not in exclude_set:
@@ -61,22 +56,14 @@ class YouTubeCollectorAdapter(ContentCollectorPort):
         return curated[0] if curated else None
 
     def search_cc_documentaries(self, query: str = "documentary", max_results: int = 30) -> List[Video]:
-        """Search online API for documentaries or fall back to local video pool / fallback catalog."""
+        """Search online API for documentaries or fall back to curated catalog."""
         if self.api_client.is_api_key_valid():
             try:
                 results = self.api_client.search_videos(query, max_results)
                 if results:
-                    existing_ids = {v.id for v in self.video_pool}
-                    for v in results:
-                        if v.id not in existing_ids:
-                            self.video_pool.append(v)
                     return results
             except Exception as e:
-                logger.error(f"YouTube API Request failed: {e}. Falling back to video pool / curated list.")
-
-        if self.video_pool:
-            logger.info(f"Using {len(self.video_pool)} videos from local video pool.")
-            return self.video_pool
+                logger.error(f"YouTube API Request failed: {e}. Falling back to curated catalog.")
 
         logger.info("Using curated Creative Commons / Public Domain documentary catalog.")
         return self.fallback_store.load_curated_videos()

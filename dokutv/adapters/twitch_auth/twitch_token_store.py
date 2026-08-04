@@ -54,3 +54,7 @@ class TwitchTokenStore:
                 logger.info(f"Cleared tokens file {self.file_path}.")
             except OSError as e:
                 logger.error(f"Failed to delete token file {self.file_path}: {e}")
+
+    def invalidate(self) -> None:
+        """Alias for clear(). Invalidate and remove token store file."""
+        self.clear()

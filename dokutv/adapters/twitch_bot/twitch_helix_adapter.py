@@ -8,10 +8,10 @@ import logging
 import urllib.error
 from typing import Optional
 
+from dokutv.domain.services import TwitchTitleFormatter
 from dokutv.application.ports import TwitchPort
 from dokutv.adapters.twitch_auth import TwitchAuthManager
 from dokutv.adapters.twitch_bot.twitch_helix_config import TwitchHelixConfig
-from dokutv.adapters.twitch_bot.twitch_title_formatter import TwitchTitleFormatter
 from dokutv.adapters.twitch_bot.twitch_helix_client import TwitchHelixClient
 
 logger = logging.getLogger(__name__)
@@ -107,5 +107,5 @@ class TwitchHelixAdapter(TwitchPort):
             )
         except urllib.error.HTTPError as http_err:
             if http_err.code == 401:
-                self.auth_manager._tokens = None
+                self.auth_manager.invalidate_tokens()
             return False
