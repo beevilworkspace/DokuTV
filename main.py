@@ -23,8 +23,8 @@ def main():
     engine = DokuTVEngine(channel_name="DokuTV_EN", dry_run=False)
 
     try:
-        # Run endless on-demand streaming loop (duration_limit=120 for 2 min test, set None for full video)
-        engine.run_continuous_stream(duration_limit=120)
+        # Run endless on-demand streaming loop for full video duration
+        engine.run_continuous_stream(duration_limit=None)
     except KeyboardInterrupt:
         print("\n[STOPP] Beenden-Signal empfangen. Stoppe Streaming Engine...")
         engine.stop()

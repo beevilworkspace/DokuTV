@@ -1,261 +1,201 @@
 """
 Interface Adapters - FFmpeg Live Streamer.
 Implements StreamerPort.
-Uses MPEG-TS piping into a persistent FFmpeg RTMP process for true 24/7 continuous Twitch streaming.
+Orchestrates streaming components (Locator, Resolver, CommandBuilder, Session, Target).
 """
 
 import os
-import shutil
+import time
 import subprocess
 import logging
-import time
-from typing import Optional
+from typing import Optional, List
 
 from dokutv.application.ports import StreamerPort
+from dokutv.adapters.streaming import (
+    StreamingConfig,
+    StreamingTarget,
+    TwitchTarget,
+    FFmpegBinaryLocator,
+    YoutubeUrlResolver,
+    FFmpegCommandBuilder,
+    PersistentStreamSession,
+    StreamResult,
+)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("FFmpegStreamerAdapter")
-
-TWITCH_RTMP_URL = "rtmp://live.twitch.tv/app"
+logger = logging.getLogger(__name__)
 
 
 class FFmpegStreamerAdapter(StreamerPort):
-    def __init__(self, stream_key: Optional[str] = None):
+    """Facade orchestrating FFmpeg streaming operations."""
+
+    def __init__(
+        self,
+        stream_key: Optional[str] = None,
+        target: Optional[StreamingTarget] = None,
+        locator: Optional[FFmpegBinaryLocator] = None,
+        resolver: Optional[YoutubeUrlResolver] = None,
+        command_builder: Optional[FFmpegCommandBuilder] = None,
+        config: Optional[StreamingConfig] = None,
+    ):
+        self.config = config or StreamingConfig.from_env()
         self.stream_key = stream_key or os.getenv("TWITCH_STREAM_KEY", "")
-        self.persistent_process: Optional[subprocess.Popen] = None
+        self.target = target or TwitchTarget()
+        self.locator = locator or FFmpegBinaryLocator()
+        self.resolver = resolver or YoutubeUrlResolver(quality_preference=self.config.quality_preference)
+        self.command_builder = command_builder or FFmpegCommandBuilder(config=self.config)
+        self.session = PersistentStreamSession()
+
+    @property
+    def persistent_process(self) -> Optional[subprocess.Popen]:
+        """Backward-compatibility property for accessing underlying process."""
+        return self.session.process
+
+    @persistent_process.setter
+    def persistent_process(self, proc: Optional[subprocess.Popen]) -> None:
+        self.session.process = proc
+
+    @property
+    def is_simulation(self) -> bool:
+        """Central check for dry-run / simulation mode."""
+        return not self.stream_key or self.stream_key.startswith("live_123456789")
 
     def get_ffmpeg_binary_path(self) -> Optional[str]:
-        """Locate FFmpeg binary: local file → imageio_ffmpeg → system PATH."""
-        if os.path.exists("ffmpeg.exe"):
-            return os.path.abspath("ffmpeg.exe")
-
-        try:
-            import imageio_ffmpeg
-            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-            if ffmpeg_exe and os.path.exists(ffmpeg_exe):
-                return ffmpeg_exe
-        except ImportError:
-            pass
-
-        which_path = shutil.which("ffmpeg")
-        if which_path:
-            return which_path
-
-        return None
+        """Locate FFmpeg binary."""
+        return self.locator.find()
 
     def start_persistent_stream(self) -> bool:
-        """Start a single continuous RTMP process to Twitch reading MPEG-TS from stdin."""
-        if not self.stream_key or self.stream_key.startswith("live_123456789"):
+        """Start a single continuous RTMP process reading MPEG-TS from stdin."""
+        if self.is_simulation:
             logger.info("[Dry Run / Simulation] Persistent stream started (Simulated).")
             return True
 
         ffmpeg_bin = self.get_ffmpeg_binary_path()
         if not ffmpeg_bin:
-            logger.error("[FEHLER] 'ffmpeg' wurde auf Ihrem System nicht gefunden!")
             return False
 
-        target_rtmp = f"{TWITCH_RTMP_URL}/{self.stream_key}"
-        cmd = [
-            ffmpeg_bin,
-            "-re",
-            "-f", "mpegts",
-            "-i", "pipe:0",
-            "-c:v", "copy",
-            "-c:a", "copy",
-            "-f", "flv",
-            target_rtmp
-        ]
-
-        try:
-            logger.info("Initializing persistent MPEG-TS → RTMP stream to Twitch...")
-            self.persistent_process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            logger.info("✅ Persistent RTMP stream connected to Twitch! (Channel stays LIVE)")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to start persistent RTMP stream: {e}")
-            self.persistent_process = None
-            return False
+        target_rtmp = self.target.get_rtmp_url(self.stream_key)
+        cmd = self.command_builder.build_persistent_rtmp_command(ffmpeg_bin, target_rtmp)
+        return self.session.start(cmd)
 
     def stop_persistent_stream(self) -> None:
         """Close stdin and terminate persistent RTMP stream process."""
-        if self.persistent_process:
-            logger.info("Closing persistent RTMP stream to Twitch...")
-            try:
-                if self.persistent_process.stdin:
-                    self.persistent_process.stdin.close()
-                self.persistent_process.terminate()
-                self.persistent_process.wait(timeout=3)
-            except Exception as e:
-                logger.warning(f"Error terminating persistent stream: {e}")
-            finally:
-                self.persistent_process = None
-            logger.info("Persistent RTMP stream closed.")
+        self.session.stop()
 
     def resolve_stream_url(self, youtube_url: str) -> Optional[str]:
-        """Resolve a YouTube URL to a direct stream URL using Streamlink / yt-dlp."""
-        if not youtube_url.startswith("http"):
-            return youtube_url
+        """Resolve a YouTube URL to a direct stream URL."""
+        return self.resolver.resolve(youtube_url)
 
-        cookies_file = os.getenv("YOUTUBE_COOKIES_FILE") or ("cookies.txt" if os.path.exists("cookies.txt") else None)
-        cookies_browser = os.getenv("YOUTUBE_COOKIES_BROWSER")
-
-        # Stage 1: Streamlink
-        try:
-            import streamlink
-            logger.info(f"Streamlink: Resolving direct stream URL for: '{youtube_url}'...")
-            session = streamlink.Streamlink()
-
-            if cookies_file and os.path.exists(cookies_file):
-                try:
-                    session.load_cookies(cookies_file)
-                except Exception:
-                    pass
-            elif cookies_browser:
-                try:
-                    session.set_option("cookies-from-browser", cookies_browser)
-                except Exception:
-                    pass
-
-            streams = session.streams(youtube_url)
-            if streams:
-                for quality in ["best", "1080p60", "1080p", "720p60", "720p", "480p", "360p", "worst"]:
-                    if quality in streams:
-                        direct_url = streams[quality].url
-                        logger.info(f"Streamlink: Selected '{quality}' stream.")
-                        return direct_url
-        except Exception as e:
-            logger.warning(f"Streamlink resolution warning: {e}")
-
-        # Stage 2: yt-dlp fallback
-        try:
-            import yt_dlp
-            logger.info(f"Falling back to yt-dlp for URL resolution of '{youtube_url}'...")
-            ydl_opts = {
-                'format': 'best[height<=1080]/best',
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': False,
-            }
-            if cookies_file and os.path.exists(cookies_file):
-                ydl_opts['cookiefile'] = os.path.abspath(cookies_file)
-            elif cookies_browser:
-                ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(youtube_url, download=False)
-                direct_url = info.get('url')
-                if direct_url:
-                    logger.info("yt-dlp: Direct stream URL resolved successfully.")
-                    return direct_url
-        except Exception as e:
-            logger.warning(f"yt-dlp fallback failed: {e}")
-
-        logger.error(f"FAILED: Could not resolve direct stream URL for '{youtube_url}'.")
-        return None
-
-    def build_feeder_command(self, ffmpeg_bin: str, input_source: str, duration_limit: Optional[int] = None) -> list:
+    def build_feeder_command(
+        self,
+        ffmpeg_bin: str,
+        input_source: str,
+        duration_limit: Optional[int] = None,
+    ) -> List[str]:
         """Build FFmpeg command to decode input_source into MPEG-TS byte stream."""
-        cmd = [ffmpeg_bin, "-re"]
-        if duration_limit:
-            cmd.extend(["-t", str(duration_limit)])
-        cmd.extend([
-            "-i", input_source,
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-maxrate", "6000k",
-            "-bufsize", "12000k",
-            "-pix_fmt", "yuv420p",
-            "-g", "120",
-            "-c:a", "aac",
-            "-b:a", "160k",
-            "-ar", "44100",
-            "-f", "mpegts",
-            "pipe:1"
-        ])
-        return cmd
+        return self.command_builder.build_feeder_command(ffmpeg_bin, input_source, duration_limit)
 
-    def stream_video(self, input_source: str, video_title: str, duration_limit: Optional[int] = None, block: bool = True) -> bool:
+    def stream_video(
+        self,
+        input_source: str,
+        video_title: str,
+        duration_limit: Optional[int] = None,
+        block: bool = True,
+    ) -> bool:
         """Stream a video seamlessly into the persistent MPEG-TS stream."""
+        result = self.stream_video_detailed(
+            input_source=input_source,
+            video_title=video_title,
+            duration_limit=duration_limit,
+            block=block,
+        )
+        return result.success
+
+    def stream_video_detailed(
+        self,
+        input_source: str,
+        video_title: str,
+        duration_limit: Optional[int] = None,
+        block: bool = True,
+    ) -> StreamResult:
+        """Stream a video returning detailed StreamResult object."""
         ffmpeg_bin = self.get_ffmpeg_binary_path()
         if not ffmpeg_bin:
-            logger.error("[FEHLER] 'ffmpeg' wurde auf Ihrem System nicht gefunden!")
-            return False
+            return StreamResult(success=False, error="FFmpeg binary not found")
 
         direct_url = self.resolve_stream_url(input_source)
         if not direct_url:
             logger.error(f"Skipping '{video_title}' – no playable stream URL available.")
-            return False
+            return StreamResult(success=False, error="Could not resolve stream URL")
 
         logger.info(f"Preparing stream for: '{video_title}'")
 
-        # Simulation Mode / Dry Run
-        if not self.stream_key or self.stream_key.startswith("live_123456789"):
+        if self.is_simulation:
             sim_time = min(duration_limit or 10, 10)
             logger.info(f"[Dry Run / Simulation] Streaming '{video_title}' for {sim_time} seconds...")
             time.sleep(sim_time)
             logger.info(f"[Dry Run / Simulation] Finished streaming '{video_title}'.")
-            return True
+            return StreamResult(success=True, duration=float(sim_time), resolved_url=direct_url)
 
-        # Case A: Persistent MPEG-TS Stream is active
-        if self.persistent_process and self.persistent_process.poll() is None and self.persistent_process.stdin:
-            logger.info(f"Feeding '{video_title}' into persistent MPEG-TS stream (Twitch stays LIVE)...")
-            cmd = self.build_feeder_command(ffmpeg_bin, direct_url, duration_limit=duration_limit)
-            try:
-                feeder_proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL
-                )
+        if self.session.is_alive:
+            return self._feed_persistent(ffmpeg_bin, direct_url, video_title, duration_limit)
 
-                buf_size = 64 * 1024
-                while True:
-                    data = feeder_proc.stdout.read(buf_size)
-                    if not data:
-                        break
-                    try:
-                        self.persistent_process.stdin.write(data)
-                        self.persistent_process.stdin.flush()
-                    except (BrokenPipeError, OSError) as write_err:
-                        logger.error(f"Persistent stream stdin write error: {write_err}")
-                        break
+        return self._stream_standalone(ffmpeg_bin, direct_url, duration_limit, block)
 
-                feeder_proc.wait()
-                logger.info(f"Finished feeding '{video_title}' to MPEG-TS stream. Pipe remains OPEN for next video!")
-                return True
-            except Exception as e:
-                logger.error(f"Error feeding stream: {e}")
-                return False
+    def _feed_persistent(
+        self,
+        ffmpeg_bin: str,
+        direct_url: str,
+        video_title: str,
+        duration_limit: Optional[int],
+    ) -> StreamResult:
+        """Sub-method for feeding video into persistent stream session."""
+        logger.info(f"Feeding '{video_title}' into persistent MPEG-TS stream...")
+        cmd = self.command_builder.build_feeder_command(ffmpeg_bin, direct_url, duration_limit)
+        try:
+            feeder_proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
 
-        # Case B: Fallback Standalone stream
+            buf_size = 64 * 1024
+            while True:
+                data = feeder_proc.stdout.read(buf_size) if feeder_proc.stdout else None
+                if not data:
+                    break
+                if not self.session.write_chunk(data):
+                    break
+
+            feeder_proc.wait()
+            logger.info(f"Finished feeding '{video_title}' to MPEG-TS stream.")
+            return StreamResult(success=True, resolved_url=direct_url)
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.error(f"Error feeding stream: {e}")
+            return StreamResult(success=False, error=str(e), resolved_url=direct_url)
+
+    def _stream_standalone(
+        self,
+        ffmpeg_bin: str,
+        direct_url: str,
+        duration_limit: Optional[int],
+        block: bool,
+    ) -> StreamResult:
+        """Sub-method for launching standalone FLV/RTMP stream process."""
         logger.warning("Persistent stream stdin unavailable. Launching standalone RTMP stream...")
-        target_rtmp = f"{TWITCH_RTMP_URL}/{self.stream_key}"
-        cmd = [ffmpeg_bin, "-re"]
-        if duration_limit:
-            cmd.extend(["-t", str(duration_limit)])
-        cmd.extend([
-            "-i", direct_url,
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-maxrate", "6000k",
-            "-bufsize", "12000k",
-            "-pix_fmt", "yuv420p",
-            "-g", "120",
-            "-c:a", "aac",
-            "-b:a", "160k",
-            "-ar", "44100",
-            "-f", "flv",
-            target_rtmp
-        ])
+        target_rtmp = self.target.get_rtmp_url(self.stream_key)
+        cmd = self.command_builder.build_standalone_command(
+            ffmpeg_bin, direct_url, target_rtmp, duration_limit
+        )
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            exit_code = None
             if block:
-                proc.wait()
-            return True
-        except Exception as e:
+                exit_code = proc.wait()
+            return StreamResult(
+                success=True,
+                resolved_url=direct_url,
+                exit_code=exit_code,
+            )
+        except (subprocess.SubprocessError, OSError) as e:
             logger.error(f"Standalone streaming error: {e}")
-            return False
+            return StreamResult(success=False, error=str(e), resolved_url=direct_url)

@@ -37,7 +37,7 @@ class DokuTVEngine:
         self.current_video: Optional[Video] = None
         self.failed_video_ids: set = set()
 
-    def run_continuous_stream(self, topic: Optional[str] = None, duration_limit: Optional[int] = 120) -> None:
+    def run_continuous_stream(self, topic: Optional[str] = None, duration_limit: Optional[int] = None) -> None:
         """Run endless streaming loop: start continuous stream -> stream videos seamlessly -> repeat."""
         self.is_running = True
         last_video_id: Optional[str] = None

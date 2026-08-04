@@ -1,14 +1,8 @@
 """
 Infrastructure Layer - Environment Variable & Framework Configuration.
+Re-exports load_env from env_loader for backward compatibility.
 """
 
-import os
-from dotenv import load_dotenv
+from dokutv.infrastructure.env_loader import load_env, EnvironmentLoader
 
-def load_env() -> None:
-    """Framework / Infrastructure helper to load environment variables."""
-    if os.path.exists(".env"):
-        load_dotenv(".env", override=True)
-    elif os.path.exists(".env.example"):
-        load_dotenv(".env.example", override=True)
-
+__all__ = ["load_env", "EnvironmentLoader"]
