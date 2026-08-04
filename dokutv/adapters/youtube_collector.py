@@ -144,14 +144,16 @@ class YouTubeCollectorAdapter(ContentCollectorPort):
                 data = json.loads(resp.read().decode("utf-8"))
             return data.get("items", []), False
         except urllib.error.HTTPError as http_err:
-            if http_err.code == 429:
-                logger.warning(f"YouTube search rate limit hit: HTTP 429 Too Many Requests.")
+            err_body = http_err.read().decode("utf-8", errors="replace")
+            if http_err.code in (403, 429):
+                logger.warning(f"YouTube API Error (HTTP {http_err.code}): {err_body}")
                 return [], True
-            logger.warning(f"YouTube search attempt HTTP error: {http_err}")
+            logger.warning(f"YouTube search attempt HTTP error {http_err.code}: {err_body}")
             return [], False
         except Exception as e:
             logger.warning(f"YouTube search attempt failed: {e}")
             return [], False
+
 
     def _get_curated_cc_documentaries(self) -> List[Video]:
         fallback_file = "data/fallback_playlist.json"
