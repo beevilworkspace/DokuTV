@@ -20,6 +20,7 @@ from dokutv.adapters.streaming import (
     FFmpegCommandBuilder,
     PersistentStreamSession,
     StreamResult,
+    ResolvedStream,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,18 +82,28 @@ class FFmpegStreamerAdapter(StreamerPort):
         """Close stdin and terminate persistent RTMP stream process."""
         self.session.stop()
 
+    def resolve_stream(self, youtube_url: str) -> Optional[ResolvedStream]:
+        """Resolve a video URL to a ResolvedStream object (with optional separate audio URL)."""
+        return self.resolver.resolve_stream(youtube_url)
+
     def resolve_stream_url(self, youtube_url: str) -> Optional[str]:
-        """Resolve a YouTube URL to a direct stream URL."""
+        """Resolve a YouTube URL to a direct stream URL (backward compatibility)."""
         return self.resolver.resolve(youtube_url)
 
     def build_feeder_command(
         self,
         ffmpeg_bin: str,
         input_source: str,
+        audio_source: Optional[str] = None,
         duration_limit: Optional[int] = None,
     ) -> List[str]:
         """Build FFmpeg command to decode input_source into MPEG-TS byte stream."""
-        return self.command_builder.build_feeder_command(ffmpeg_bin, input_source, duration_limit)
+        return self.command_builder.build_feeder_command(
+            ffmpeg_bin=ffmpeg_bin,
+            input_source=input_source,
+            audio_source=audio_source,
+            duration_limit=duration_limit,
+        )
 
     def stream_video(
         self,
@@ -122,35 +133,48 @@ class FFmpegStreamerAdapter(StreamerPort):
         if not ffmpeg_bin:
             return StreamResult(success=False, error="FFmpeg binary not found")
 
-        direct_url = self.resolve_stream_url(input_source)
-        if not direct_url:
+        stream_info = self.resolve_stream(input_source)
+        if not stream_info or not stream_info.is_valid:
             logger.error(f"Skipping '{video_title}' – no playable stream URL available.")
             return StreamResult(success=False, error="Could not resolve stream URL")
 
-        logger.info(f"Preparing stream for: '{video_title}'")
+        logger.info(
+            f"Preparing stream for: '{video_title}' (Resolution: {stream_info.resolution}, "
+            f"Dual-Input: {stream_info.is_dual_input})"
+        )
 
         if self.is_simulation:
             sim_time = min(duration_limit or 10, 10)
             logger.info(f"[Dry Run / Simulation] Streaming '{video_title}' for {sim_time} seconds...")
             time.sleep(sim_time)
             logger.info(f"[Dry Run / Simulation] Finished streaming '{video_title}'.")
-            return StreamResult(success=True, duration=float(sim_time), resolved_url=direct_url)
+            return StreamResult(
+                success=True,
+                duration=float(sim_time),
+                resolved_url=stream_info.video_url,
+                resolved_stream=stream_info,
+            )
 
         if self.session.is_alive:
-            return self._feed_persistent(ffmpeg_bin, direct_url, video_title, duration_limit)
+            return self._feed_persistent(ffmpeg_bin, stream_info, video_title, duration_limit)
 
-        return self._stream_standalone(ffmpeg_bin, direct_url, duration_limit, block)
+        return self._stream_standalone(ffmpeg_bin, stream_info, duration_limit, block)
 
     def _feed_persistent(
         self,
         ffmpeg_bin: str,
-        direct_url: str,
+        stream_info: ResolvedStream,
         video_title: str,
         duration_limit: Optional[int],
     ) -> StreamResult:
         """Sub-method for feeding video into persistent stream session."""
         logger.info(f"Feeding '{video_title}' into persistent MPEG-TS stream...")
-        cmd = self.command_builder.build_feeder_command(ffmpeg_bin, direct_url, duration_limit)
+        cmd = self.command_builder.build_feeder_command(
+            ffmpeg_bin=ffmpeg_bin,
+            input_source=stream_info.video_url,
+            audio_source=stream_info.audio_url,
+            duration_limit=duration_limit,
+        )
         try:
             feeder_proc = subprocess.Popen(
                 cmd,
@@ -168,15 +192,20 @@ class FFmpegStreamerAdapter(StreamerPort):
 
             feeder_proc.wait()
             logger.info(f"Finished feeding '{video_title}' to MPEG-TS stream.")
-            return StreamResult(success=True, resolved_url=direct_url)
+            return StreamResult(success=True, resolved_url=stream_info.video_url, resolved_stream=stream_info)
         except (subprocess.SubprocessError, OSError) as e:
             logger.error(f"Error feeding stream: {e}")
-            return StreamResult(success=False, error=str(e), resolved_url=direct_url)
+            return StreamResult(
+                success=False,
+                error=str(e),
+                resolved_url=stream_info.video_url,
+                resolved_stream=stream_info,
+            )
 
     def _stream_standalone(
         self,
         ffmpeg_bin: str,
-        direct_url: str,
+        stream_info: ResolvedStream,
         duration_limit: Optional[int],
         block: bool,
     ) -> StreamResult:
@@ -184,7 +213,11 @@ class FFmpegStreamerAdapter(StreamerPort):
         logger.warning("Persistent stream stdin unavailable. Launching standalone RTMP stream...")
         target_rtmp = self.target.get_rtmp_url(self.stream_key)
         cmd = self.command_builder.build_standalone_command(
-            ffmpeg_bin, direct_url, target_rtmp, duration_limit
+            ffmpeg_bin=ffmpeg_bin,
+            input_source=stream_info.video_url,
+            target_rtmp_url=target_rtmp,
+            audio_source=stream_info.audio_url,
+            duration_limit=duration_limit,
         )
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -193,9 +226,15 @@ class FFmpegStreamerAdapter(StreamerPort):
                 exit_code = proc.wait()
             return StreamResult(
                 success=True,
-                resolved_url=direct_url,
+                resolved_url=stream_info.video_url,
+                resolved_stream=stream_info,
                 exit_code=exit_code,
             )
         except (subprocess.SubprocessError, OSError) as e:
             logger.error(f"Standalone streaming error: {e}")
-            return StreamResult(success=False, error=str(e), resolved_url=direct_url)
+            return StreamResult(
+                success=False,
+                error=str(e),
+                resolved_url=stream_info.video_url,
+                resolved_stream=stream_info,
+            )

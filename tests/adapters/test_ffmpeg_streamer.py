@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import MagicMock, patch
 from dokutv.adapters import (
     FFmpegStreamerAdapter,
     StreamingConfig,
@@ -7,6 +8,7 @@ from dokutv.adapters import (
     FFmpegCommandBuilder,
     PersistentStreamSession,
     YoutubeUrlResolver,
+    ResolvedStream,
 )
 
 
@@ -52,6 +54,34 @@ class TestFFmpegStreamerAdapter(unittest.TestCase):
         self.assertIn("mpegts", cmd_rtmp)
         self.assertEqual(cmd_rtmp[-1], "rtmp://live.twitch.tv/app/key")
 
+    def test_command_builder_dual_input(self):
+        config = StreamingConfig(video_preset="veryfast")
+        builder = FFmpegCommandBuilder(config=config)
+
+        cmd_feeder = builder.build_feeder_command(
+            "ffmpeg",
+            "video_url.mp4",
+            audio_source="audio_url.m4a",
+            duration_limit=15
+        )
+        self.assertIn("-i", cmd_feeder)
+        self.assertIn("video_url.mp4", cmd_feeder)
+        self.assertIn("audio_url.m4a", cmd_feeder)
+        self.assertIn("-map", cmd_feeder)
+        self.assertIn("0:v:0", cmd_feeder)
+        self.assertIn("1:a:0", cmd_feeder)
+
+        cmd_standalone = builder.build_standalone_command(
+            "ffmpeg",
+            "video_url.mp4",
+            "rtmp://live.twitch.tv/app/key",
+            audio_source="audio_url.m4a",
+            duration_limit=15
+        )
+        self.assertIn("video_url.mp4", cmd_standalone)
+        self.assertIn("audio_url.m4a", cmd_standalone)
+        self.assertIn("1:a:0", cmd_standalone)
+
     def test_persistent_stream_session_initial_state(self):
         session = PersistentStreamSession()
         self.assertFalse(session.is_alive)
@@ -61,6 +91,11 @@ class TestFFmpegStreamerAdapter(unittest.TestCase):
         resolver = YoutubeUrlResolver()
         local_path = "C:/media/sample.mp4"
         self.assertEqual(resolver.resolve(local_path), local_path)
+        resolved_stream = resolver.resolve_stream(local_path)
+        self.assertIsInstance(resolved_stream, ResolvedStream)
+        self.assertEqual(resolved_stream.video_url, local_path)
+        self.assertIsNone(resolved_stream.audio_url)
+        self.assertFalse(resolved_stream.is_dual_input)
 
 
 if __name__ == "__main__":

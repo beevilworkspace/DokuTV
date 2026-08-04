@@ -49,14 +49,19 @@ class FFmpegCommandBuilder:
         self,
         ffmpeg_bin: str,
         input_source: str,
+        audio_source: Optional[str] = None,
         duration_limit: Optional[int] = None,
     ) -> List[str]:
-        """Build command to decode input_source into MPEG-TS stdout stream."""
+        """Build command to decode input_source (and optional audio_source) into MPEG-TS stdout stream."""
         cmd = [ffmpeg_bin, "-re"]
         if duration_limit:
             cmd.extend(["-t", str(duration_limit)])
 
         cmd.extend(["-i", input_source])
+        if audio_source:
+            cmd.extend(["-i", audio_source])
+            cmd.extend(["-map", "0:v:0", "-map", "1:a:0"])
+
         cmd.extend(self.get_video_options())
         cmd.extend(self.get_audio_options())
         cmd.extend(["-f", "mpegts", "pipe:1"])
@@ -67,6 +72,7 @@ class FFmpegCommandBuilder:
         ffmpeg_bin: str,
         input_source: str,
         target_rtmp_url: str,
+        audio_source: Optional[str] = None,
         duration_limit: Optional[int] = None,
     ) -> List[str]:
         """Build command for standalone FLV/RTMP stream process."""
@@ -75,6 +81,10 @@ class FFmpegCommandBuilder:
             cmd.extend(["-t", str(duration_limit)])
 
         cmd.extend(["-i", input_source])
+        if audio_source:
+            cmd.extend(["-i", audio_source])
+            cmd.extend(["-map", "0:v:0", "-map", "1:a:0"])
+
         cmd.extend(self.get_video_options())
         cmd.extend(self.get_audio_options())
         cmd.extend(["-f", "flv", target_rtmp_url])

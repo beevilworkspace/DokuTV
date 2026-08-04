@@ -35,6 +35,7 @@ from dokutv.adapters.streaming import (
     FFmpegCommandBuilder,
     PersistentStreamSession,
     StreamResult,
+    ResolvedStream,
 )
 
 __all__ = [
@@ -64,4 +65,5 @@ __all__ = [
     "FFmpegCommandBuilder",
     "PersistentStreamSession",
     "StreamResult",
+    "ResolvedStream",
 ]
