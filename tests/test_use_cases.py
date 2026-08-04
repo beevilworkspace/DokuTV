@@ -1,39 +1,53 @@
 import unittest
-from dokutv.domain.models import Video, PlaySlot
-from dokutv.application.use_cases import DiscoverContentUseCase, PlanScheduleUseCase
+from dokutv.domain.models import Video
+from dokutv.application.use_cases import (
+    StreamSingleVideoUseCase,
+)
 
 class MockCollectorAdapter:
     def search_cc_documentaries(self, query: str = "documentary", max_results: int = 30):
-        return [Video(id="m1", title="Mock Doc 1")]
-    def save_playlist_cache(self, videos, filepath="data/playlist_cache.json"):
-        pass
+        return [Video(id="m1", title="Mock Doc 1"), Video(id="m2", title="Mock Doc 2")]
+    def get_next_video(self, query: str = "documentary", exclude_ids=None):
+        if exclude_ids and "m1" in exclude_ids:
+            return Video(id="m2", title="Mock Doc 2")
+        return Video(id="m1", title="Mock Doc 1")
 
-class MockScheduleRepoAdapter:
-    def load_videos(self):
-        return [Video(id="m1", title="Mock Doc 1")]
-    def generate_30_day_schedule(self, videos):
-        return [PlaySlot(
-            slot_index=1, video_id="m1", title="Mock Doc 1",
-            youtube_url="https://youtube.com/watch?v=m1",
-            start_time="2026-08-03T12:00:00", end_time="2026-08-03T13:00:00"
-        )]
-    def get_current_playing_slot(self, schedule):
-        return schedule[0] if schedule else None
-    def save_schedule(self, schedule, filepath="data/schedule_30_days.json"):
-        pass
+
+class MockStreamer:
+    def __init__(self):
+        self.streamed_titles = []
+
+    def stream_video(self, video_source: str, title: str, duration_limit=None, block=True) -> bool:
+        self.streamed_titles.append(title)
+        return True
+
+class MockTwitchAdapter:
+    def __init__(self):
+        self.updated_title = None
+
+    def update_stream_title(self, title: str) -> bool:
+        self.updated_title = title
+        return True
 
 class TestUseCases(unittest.TestCase):
-    def test_discover_content_use_case(self):
-        use_case = DiscoverContentUseCase(collector_port=MockCollectorAdapter())
-        videos = use_case.execute(query="nature")
-        self.assertEqual(len(videos), 1)
-        self.assertEqual(videos[0].id, "m1")
+    def test_stream_single_video_use_case(self):
+        collector = MockCollectorAdapter()
+        streamer = MockStreamer()
+        twitch = MockTwitchAdapter()
 
-    def test_plan_schedule_use_case(self):
-        use_case = PlanScheduleUseCase(schedule_repo_port=MockScheduleRepoAdapter())
-        schedule = use_case.execute()
-        self.assertEqual(len(schedule), 1)
-        self.assertEqual(schedule[0].title, "Mock Doc 1")
+        use_case = StreamSingleVideoUseCase(
+            collector_port=collector,
+            streamer_port=streamer,
+            twitch_port=twitch,
+        )
+
+        video, _ = use_case.execute(exclude_ids={"m1"})
+
+        self.assertIsNotNone(video)
+        self.assertEqual(video.id, "m2")
+        self.assertEqual(video.title, "Mock Doc 2")
+        self.assertEqual(streamer.streamed_titles, ["Mock Doc 2"])
+        self.assertEqual(twitch.updated_title, "Mock Doc 2")
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,8 +4,7 @@ Pure domain models with ZERO external or framework dependencies.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import List, Optional
+from typing import List
 
 @dataclass
 class Video:

@@ -1,21 +1,14 @@
-"""
-Composition Root - DokuTV Engine.
-Assembles Adapters and Use Cases into a unified high-level engine.
-"""
-
 import logging
-from typing import Dict, Any, List, Optional
+import time
+from typing import Dict, Any, Optional
 
-from dokutv.domain.models import Video, PlaySlot
+from dokutv.domain.models import Video
 from dokutv.domain.topics import get_random_topic
 from dokutv.application.use_cases import (
-    DiscoverContentUseCase,
-    PlanScheduleUseCase,
-    StreamCurrentSlotUseCase,
+    StreamSingleVideoUseCase,
 )
 from dokutv.adapters import (
     YouTubeCollectorAdapter,
-    ScheduleRepositoryAdapter,
     FFmpegStreamerAdapter,
     TwitchHelixAdapter,
 )
@@ -30,62 +23,76 @@ class DokuTVEngine:
 
         # 1. Instantiate Adapters (Layer 3)
         self.collector_adapter = YouTubeCollectorAdapter()
-        self.schedule_repo_adapter = ScheduleRepositoryAdapter(playlist_file="data/playlist_cache.json")
         self.streamer_adapter = FFmpegStreamerAdapter()
         self.twitch_adapter = TwitchHelixAdapter(channel_name=self.channel_name)
 
-        # 2. Inject Adapters into Use Cases (Layer 2)
-        self.discover_use_case = DiscoverContentUseCase(collector_port=self.collector_adapter)
-        self.plan_schedule_use_case = PlanScheduleUseCase(schedule_repo_port=self.schedule_repo_adapter)
-        self.stream_slot_use_case = StreamCurrentSlotUseCase(
-            schedule_repo_port=self.schedule_repo_adapter,
+        # 2. Inject Adapters into Use Case (Layer 2)
+        self.stream_single_video_use_case = StreamSingleVideoUseCase(
+            collector_port=self.collector_adapter,
             streamer_port=self.streamer_adapter,
             twitch_port=self.twitch_adapter,
         )
 
-        self.videos: List[Video] = []
-        self.schedule: List[PlaySlot] = []
         self.is_running = False
+        self.current_video: Optional[Video] = None
+        self.failed_video_ids: set = set()
 
-    def initialize(self, query: Optional[str] = None) -> Dict[str, Any]:
-        selected_query = query or get_random_topic()
-        logger.info(f"DokuTVEngine Composition Root: Initializing with topic: '{selected_query}'...")
-        self.videos = self.discover_use_case.execute(query=selected_query, max_results=30)
-        self.schedule = self.plan_schedule_use_case.execute(videos=self.videos)
-
-        logger.info(f"Initialized with {len(self.schedule)} schedule slots.")
-        return {
-            "status": "initialized",
-            "video_count": len(self.videos),
-            "slots_count": len(self.schedule),
-        }
-
-    def start(self) -> Dict[str, Any]:
-        if not self.schedule:
-            self.initialize()
-
+    def run_continuous_stream(self, topic: Optional[str] = None, duration_limit: Optional[int] = 120) -> None:
+        """Run endless streaming loop: start continuous stream -> stream videos seamlessly -> repeat."""
         self.is_running = True
-        result = self.stream_slot_use_case.execute(self.schedule)
-        
-        return {
-            "is_running": self.is_running,
-            "current_slot": result["current_slot"],
-            "stream_launched": result["stream_launched"],
-        }
+        last_video_id: Optional[str] = None
+        next_pre_fetched_video: Optional[Video] = None
+
+        logger.info("Starting DokuTV Engine (Continuous 24/7 Live Stream Loop)...")
+
+        # Start single persistent RTMP connection to Twitch
+        self.streamer_adapter.start_persistent_stream()
+
+        try:
+            while self.is_running:
+                selected_topic = topic or get_random_topic()
+                
+                exclude_ids = set(self.failed_video_ids)
+                if last_video_id:
+                    exclude_ids.add(last_video_id)
+
+                logger.info(f"--- New Stream Cycle | Topic: '{selected_topic}' (Exclude IDs count: {len(exclude_ids)}) ---")
+
+                video, pre_fetched = self.stream_single_video_use_case.execute(
+                    query=selected_topic,
+                    exclude_ids=exclude_ids,
+                    duration_limit=duration_limit,
+                    current_video=next_pre_fetched_video,
+                )
+
+                if video:
+                    self.current_video = video
+                    last_video_id = video.id
+                    next_pre_fetched_video = pre_fetched
+                    logger.info(f"Video '{video.title}' finished streaming seamlessly. Proceeding to next video...")
+                else:
+                    logger.warning("Could not stream selected video. Retrying next candidate...")
+                    next_pre_fetched_video = None
+                    time.sleep(1)
+
+        except Exception as e:
+            logger.error(f"DokuTVEngine encountered error in main loop: {e}")
+        finally:
+            self.is_running = False
+            self.streamer_adapter.stop_persistent_stream()
+            logger.info("DokuTVEngine continuous loop stopped.")
 
     def get_status(self) -> Dict[str, Any]:
-        current_slot = (
-            self.schedule_repo_adapter.get_current_playing_slot(self.schedule)
-            if self.schedule else None
-        )
         return {
             "channel_name": self.channel_name,
             "is_running": self.is_running,
             "dry_run": self.dry_run,
-            "current_slot": current_slot.__dict__ if current_slot else None,
+            "current_video": self.current_video.__dict__ if self.current_video else None,
             "streamer_key_set": bool(self.streamer_adapter.stream_key),
+            "persistent_stream_active": bool(self.streamer_adapter.persistent_process),
         }
 
     def stop(self) -> None:
         logger.info("Stopping DokuTVEngine operations.")
         self.is_running = False
+        self.streamer_adapter.stop_persistent_stream()

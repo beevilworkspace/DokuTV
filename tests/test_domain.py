@@ -1,5 +1,5 @@
 import unittest
-from dokutv.domain.models import Video, PlaySlot, ChannelSchedule
+from dokutv.domain.models import Video, PlaySlot
 
 class TestDomainEntities(unittest.TestCase):
     def test_video_entity(self):

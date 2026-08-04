@@ -1,81 +1,108 @@
 """
 Application Layer - Use Cases.
 Contains application-specific business logic and orchestrates domain entities through ports.
+Includes Pre-Fetching support for seamless continuous streaming.
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+import threading
+import time
+from typing import Any, Optional, Tuple
 
-from dokutv.domain.models import Video, PlaySlot
+from dokutv.domain.models import Video
 from dokutv.application.ports import (
     ContentCollectorPort,
-    ScheduleRepositoryPort,
     StreamerPort,
     TwitchPort,
 )
 
 logger = logging.getLogger("ApplicationUseCases")
 
-class DiscoverContentUseCase:
-    """Use Case for searching documentaries and saving cache."""
-    def __init__(self, collector_port: ContentCollectorPort):
-        self.collector_port = collector_port
 
-    def execute(self, query: str = "nature science documentary HD", max_results: int = 30) -> List[Video]:
-        logger.info(f"DiscoverContentUseCase: Executing discovery for '{query}'...")
-        videos = self.collector_port.search_cc_documentaries(query=query, max_results=max_results)
-        self.collector_port.save_playlist_cache(videos)
-        return videos
-
-class PlanScheduleUseCase:
-    """Use Case for generating 30-day broadcast schedule."""
-    def __init__(self, schedule_repo_port: ScheduleRepositoryPort):
-        self.schedule_repo_port = schedule_repo_port
-
-    def execute(self, videos: Optional[List[Video]] = None) -> List[PlaySlot]:
-        logger.info("PlanScheduleUseCase: Generating 30-day schedule...")
-        if not videos:
-            videos = self.schedule_repo_port.load_videos()
-        schedule = self.schedule_repo_port.generate_30_day_schedule(videos)
-        self.schedule_repo_port.save_schedule(schedule)
-        return schedule
-
-class StreamCurrentSlotUseCase:
-    """Use Case for playing the active schedule slot and updating Twitch title."""
+class StreamSingleVideoUseCase:
+    """Use Case for selecting a video, updating Twitch, pre-fetching the next candidate, and streaming."""
     def __init__(
         self,
-        schedule_repo_port: ScheduleRepositoryPort,
+        collector_port: ContentCollectorPort,
         streamer_port: StreamerPort,
         twitch_port: TwitchPort,
     ):
-        self.schedule_repo_port = schedule_repo_port
+        self.collector_port = collector_port
         self.streamer_port = streamer_port
         self.twitch_port = twitch_port
+        self.next_pre_fetched_video: Optional[Video] = None
 
-    def execute(self, schedule: List[PlaySlot], max_retries: int = 5) -> Dict[str, Any]:
-        logger.info("StreamCurrentSlotUseCase: Determining active play slot...")
-        current_slot = self.schedule_repo_port.get_current_playing_slot(schedule)
-        if not current_slot:
-            raise ValueError("No playing slot available in schedule.")
+    def pre_fetch_next_video(self, query: str, exclude_ids: Optional[Any] = None) -> Optional[Video]:
+        """Pre-fetch next video candidate in background before current video finishes."""
+        try:
+            logger.info(f"⚡ [Pre-Fetch] Fetching next candidate in background for query: '{query}'...")
+            video = self.collector_port.get_next_video(query=query, exclude_ids=exclude_ids)
+            if video:
+                logger.info(f"⚡ [Pre-Fetch] Pre-fetched ready video: '{video.title}' (ID: {video.id})")
+                self.next_pre_fetched_video = video
+                return video
+        except Exception as e:
+            logger.warning(f"⚡ [Pre-Fetch] Failed to pre-fetch next video: {e}")
+        return None
 
-        start_idx = current_slot.slot_index - 1
-        for offset in range(min(max_retries, len(schedule))):
-            candidate_slot = schedule[(start_idx + offset) % len(schedule)]
-            logger.info(f"StreamCurrentSlotUseCase: Attempting slot #{candidate_slot.slot_index} - '{candidate_slot.title}'")
-            
-            video_source = candidate_slot.youtube_url or "sample_doc.mp4"
-            success = self.streamer_port.stream_video(video_source, candidate_slot.title)
+    def execute(
+        self,
+        query: str = "nature science documentary HD",
+        exclude_ids: Optional[Any] = None,
+        duration_limit: Optional[int] = None,
+        current_video: Optional[Video] = None,
+    ) -> Tuple[Optional[Video], Optional[Video]]:
+        """
+        Execute video streaming session.
+        Returns tuple: (played_video, pre_fetched_next_video)
+        """
+        # 1. Use pre-fetched video if available, otherwise fetch new video
+        video = current_video or self.next_pre_fetched_video or self.collector_port.get_next_video(query=query, exclude_ids=exclude_ids)
+        self.next_pre_fetched_video = None
 
-            if success:
-                self.twitch_port.update_stream_title(candidate_slot.title)
-                return {
-                    "current_slot": candidate_slot,
-                    "stream_launched": True,
-                }
-            
-            logger.warning(f"Slot #{candidate_slot.slot_index} ('{candidate_slot.title}') is unplayable. Retrying with next slot...")
+        if not video:
+            logger.error("No video found to stream.")
+            return None, None
 
-        return {
-            "current_slot": current_slot,
-            "stream_launched": False,
-        }
+        logger.info(f"Selected video for broadcast: '{video.title}' (ID: {video.id})")
+        
+        # 2. Update Twitch Title & Category
+        self.twitch_port.update_stream_title(video.title)
+        
+        # 3. Schedule Pre-Fetch thread to load next video ~30s before end (or immediately if short duration)
+        effective_duration = duration_limit or getattr(video, 'duration_seconds', 3600)
+        prefetch_delay = max(1, effective_duration - 30)
+
+        exclude_set = set(exclude_ids) if isinstance(exclude_ids, (set, list)) else set()
+        exclude_set.add(video.id)
+
+        prefetch_thread = threading.Thread(
+            target=self.pre_fetch_next_video,
+            args=(query, exclude_set),
+            daemon=True
+        )
+
+        def delayed_prefetch():
+            time.sleep(prefetch_delay)
+            prefetch_thread.start()
+
+        timer_thread = threading.Thread(target=delayed_prefetch, daemon=True)
+        timer_thread.start()
+
+        # 4. Stream video to Twitch (blocking until completed)
+        video_source = video.youtube_url or "sample_doc.mp4"
+        success = self.streamer_port.stream_video(
+            video_source,
+            video.title,
+            duration_limit=duration_limit,
+            block=True
+        )
+
+        if success:
+            logger.info(f"Stream finished playing for '{video.title}'.")
+            return video, self.next_pre_fetched_video
+        else:
+            logger.warning(f"Failed to stream '{video.title}' (ID: {video.id}). Blacklisting ID.")
+            if isinstance(exclude_ids, set):
+                exclude_ids.add(video.id)
+            return None, None
