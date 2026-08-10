@@ -29,5 +29,16 @@ class TestDomainServices(unittest.TestCase):
         self.assertEqual(result, "Simple Video Title")
 
 
+    def test_title_formatter_html_unescape(self):
+        formatter = TwitchTitleFormatter(
+            title_prefix="🔴 24/7 Doku:",
+            title_suffix="| DokuTV_EN",
+        )
+        raw_title = "Secrets of the Octopus: the Ocean&#39;s Masterminds &amp; More"
+        result = formatter.format_title(raw_title)
+        self.assertEqual(result, "🔴 24/7 Doku: Secrets of the Octopus: the Ocean's Masterminds & More | DokuTV_EN")
+
+
 if __name__ == "__main__":
     unittest.main()
+

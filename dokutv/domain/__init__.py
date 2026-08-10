@@ -3,7 +3,7 @@ Domain Layer Package
 Pure domain models, value objects, domain services, and domain exceptions.
 """
 
-from dokutv.domain.models import Video, PlaySlot, ChannelSchedule
+from dokutv.domain.models import Video, PlaySlot, ChannelSchedule, PlayHistoryEntry
 from dokutv.domain.topics import (
     DOCUMENTARY_TOPICS,
     TopicCategory,
@@ -21,6 +21,7 @@ __all__ = [
     "Video",
     "PlaySlot",
     "ChannelSchedule",
+    "PlayHistoryEntry",
     "DOCUMENTARY_TOPICS",
     "TopicCategory",
     "TopicProvider",
@@ -31,3 +32,4 @@ __all__ = [
     "InvalidVideoError",
     "ScheduleError",
 ]
+

@@ -79,5 +79,18 @@ class TestYouTubeCollectorAdapter(unittest.TestCase):
         mock_api.search_videos.assert_called_once_with("nature", 30)
 
 
+    def test_parse_iso8601_duration(self):
+        from dokutv.adapters.collector.youtube_api_client import parse_iso8601_duration
+
+        self.assertEqual(parse_iso8601_duration("PT1H23M45S"), 5025)
+        self.assertEqual(parse_iso8601_duration("PT45M10S"), 2710)
+        self.assertEqual(parse_iso8601_duration("PT2H"), 7200)
+        self.assertEqual(parse_iso8601_duration("PT30S"), 30)
+        self.assertEqual(parse_iso8601_duration("P1DT2H"), 93600)
+        self.assertEqual(parse_iso8601_duration("invalid"), 3600)
+        self.assertEqual(parse_iso8601_duration(""), 3600)
+
+
 if __name__ == "__main__":
     unittest.main()
+

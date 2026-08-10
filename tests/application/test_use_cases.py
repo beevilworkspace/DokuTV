@@ -5,6 +5,7 @@ from tests.fakes import (
     FakeContentCollectorAdapter,
     FakeStreamerAdapter,
     FakeTwitchAdapter,
+    FakeHistoryAdapter,
 )
 
 
@@ -29,6 +30,51 @@ class TestStreamSingleVideoUseCase(unittest.TestCase):
         self.assertEqual(streamer.streamed_titles, ["Mock Doc 2"])
         self.assertEqual(twitch.updated_titles, ["Mock Doc 2"])
 
+    def test_stream_single_video_history_recording(self):
+        collector = FakeContentCollectorAdapter()
+        streamer = FakeStreamerAdapter(success_response=True)
+        twitch = FakeTwitchAdapter()
+        history = FakeHistoryAdapter()
+
+        use_case = StreamSingleVideoUseCase(
+            collector_port=collector,
+            streamer_port=streamer,
+            twitch_port=twitch,
+            history_port=history,
+        )
+
+        video, _ = use_case.execute(query="space", exclude_ids=set())
+
+        self.assertIsNotNone(video)
+        self.assertEqual(len(history.entries), 1)
+        entry = history.entries[0]
+        self.assertEqual(entry.video_id, "m1")
+        self.assertEqual(entry.title, "Mock Doc 1")
+        self.assertEqual(entry.topic, "space")
+        self.assertEqual(entry.status, "played")
+
+    def test_stream_single_video_history_failure_recording(self):
+        collector = FakeContentCollectorAdapter()
+        streamer = FakeStreamerAdapter(success_response=False)
+        twitch = FakeTwitchAdapter()
+        history = FakeHistoryAdapter()
+
+        use_case = StreamSingleVideoUseCase(
+            collector_port=collector,
+            streamer_port=streamer,
+            twitch_port=twitch,
+            history_port=history,
+        )
+
+        video, _ = use_case.execute(query="space", exclude_ids=set())
+
+        self.assertIsNone(video)
+        self.assertEqual(len(history.entries), 1)
+        entry = history.entries[0]
+        self.assertEqual(entry.video_id, "m1")
+
+
 
 if __name__ == "__main__":
     unittest.main()
+

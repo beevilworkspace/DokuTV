@@ -6,6 +6,7 @@ Defines abstract contracts for external dependencies using Dependency Inversion 
 from dokutv.application.ports.collector_port import ContentCollectorPort
 from dokutv.application.ports.streamer_port import StreamerPort, PersistentStreamerPort
 from dokutv.application.ports.twitch_port import TwitchPort, ChannelManagementPort
+from dokutv.application.ports.history_port import PlayHistoryPort
 
 __all__ = [
     "ContentCollectorPort",
@@ -13,4 +14,6 @@ __all__ = [
     "PersistentStreamerPort",
     "TwitchPort",
     "ChannelManagementPort",
+    "PlayHistoryPort",
 ]
+

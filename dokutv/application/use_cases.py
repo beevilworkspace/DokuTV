@@ -4,16 +4,18 @@ Contains application-specific business logic and orchestrates domain entities th
 Includes Pre-Fetching support for seamless continuous streaming.
 """
 
+from datetime import datetime, timezone
 import logging
 import threading
 import time
 from typing import Any, Optional, Tuple
 
-from dokutv.domain.models import Video
+from dokutv.domain.models import Video, PlayHistoryEntry
 from dokutv.application.ports import (
     ContentCollectorPort,
     StreamerPort,
     TwitchPort,
+    PlayHistoryPort,
 )
 
 logger = logging.getLogger("ApplicationUseCases")
@@ -26,10 +28,12 @@ class StreamSingleVideoUseCase:
         collector_port: ContentCollectorPort,
         streamer_port: StreamerPort,
         twitch_port: TwitchPort,
+        history_port: Optional[PlayHistoryPort] = None,
     ):
         self.collector_port = collector_port
         self.streamer_port = streamer_port
         self.twitch_port = twitch_port
+        self.history_port = history_port
         self.next_pre_fetched_video: Optional[Video] = None
 
     def pre_fetch_next_video(self, query: str, exclude_ids: Optional[Any] = None) -> Optional[Video]:
@@ -89,7 +93,21 @@ class StreamSingleVideoUseCase:
         timer_thread = threading.Thread(target=delayed_prefetch, daemon=True)
         timer_thread.start()
 
-        # 4. Stream video to Twitch (blocking until completed)
+        # 4. Record play history entry immediately at stream start
+        if self.history_port:
+            entry = PlayHistoryEntry(
+                video_id=video.id,
+                title=video.title,
+                played_at=datetime.now(timezone.utc).isoformat(),
+                duration_seconds=effective_duration,
+                topic=query,
+                youtube_url=video.youtube_url,
+                license=video.license,
+                status="played",
+            )
+            self.history_port.add_entry(entry)
+
+        # 5. Stream video to Twitch (blocking until completed)
         video_source = video.youtube_url or "sample_doc.mp4"
         success = self.streamer_port.stream_video(
             video_source,
@@ -106,3 +124,5 @@ class StreamSingleVideoUseCase:
             if isinstance(exclude_ids, set):
                 exclude_ids.add(video.id)
             return None, None
+
+

@@ -4,11 +4,12 @@ Provides lightweight test doubles for ContentCollectorPort, StreamerPort, and Tw
 """
 
 from typing import List, Optional, Set, Sequence, Union
-from dokutv.domain.models import Video
+from dokutv.domain.models import Video, PlayHistoryEntry
 from dokutv.application.ports import (
     ContentCollectorPort,
     StreamerPort,
     TwitchPort,
+    PlayHistoryPort,
 )
 
 
@@ -71,3 +72,20 @@ class FakeTwitchAdapter(TwitchPort):
     def update_stream_title(self, video_title: str) -> bool:
         self.updated_titles.append(video_title)
         return self.success_response
+
+
+class FakeHistoryAdapter(PlayHistoryPort):
+    """Fake play history adapter storing entries in memory."""
+
+    def __init__(self) -> None:
+        self.entries: List[PlayHistoryEntry] = []
+
+    def add_entry(self, entry: PlayHistoryEntry) -> None:
+        self.entries.append(entry)
+
+    def get_history(self) -> List[PlayHistoryEntry]:
+        return list(self.entries)
+
+    def clear_history(self) -> None:
+        self.entries.clear()
+

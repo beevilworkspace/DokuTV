@@ -111,3 +111,44 @@ class ChannelSchedule:
     def is_empty(self) -> bool:
         """Check if schedule contains no slots."""
         return len(self.slots) == 0
+
+
+@dataclass
+class PlayHistoryEntry:
+    """Core domain entity representing a recorded broadcast video in history."""
+    video_id: str
+    title: str
+    played_at: str
+    duration_seconds: int = 3600
+    topic: str = ""
+    youtube_url: str = ""
+    license: str = "creativeCommon"
+    status: str = "played"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize PlayHistoryEntry to dictionary."""
+        return {
+            "video_id": self.video_id,
+            "title": self.title,
+            "played_at": self.played_at,
+            "duration_seconds": self.duration_seconds,
+            "topic": self.topic,
+            "youtube_url": self.youtube_url,
+            "license": self.license,
+            "status": self.status,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PlayHistoryEntry":
+        """Instantiate PlayHistoryEntry from dictionary data."""
+        return cls(
+            video_id=data["video_id"],
+            title=data["title"],
+            played_at=data["played_at"],
+            duration_seconds=int(data.get("duration_seconds", 3600)),
+            topic=data.get("topic", ""),
+            youtube_url=data.get("youtube_url", ""),
+            license=data.get("license", "creativeCommon"),
+            status=data.get("status", "played"),
+        )
+

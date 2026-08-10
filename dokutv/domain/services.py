@@ -3,6 +3,7 @@ Domain Services Package.
 Contains domain services for stream title formatting and core business rules.
 """
 
+import html
 from typing import Optional, Any
 
 
@@ -37,16 +38,18 @@ class TwitchTitleFormatter:
 
     def format_title(self, video_title: str) -> str:
         """Format stream title with standard prefix and suffix."""
+        clean_title = html.unescape(video_title)
         prefix = self.title_prefix
         suffix = self.title_suffix
 
-        result = video_title
+        result = clean_title
         if prefix:
             result = f"{prefix} {result}"
         if suffix:
             result = f"{result} {suffix}"
 
         return result.strip()
+
 
 
 # Alias for Domain Service
