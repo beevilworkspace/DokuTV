@@ -3,7 +3,7 @@ FFmpeg command builder component.
 Centralizes command-line argument creation for feeder, persistent RTMP, and standalone streams.
 """
 
-from typing import List, Optional, Sequence
+from typing import List, Optional
 from dokutv.adapters.streaming.config import StreamingConfig
 
 
