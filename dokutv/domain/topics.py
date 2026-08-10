@@ -42,10 +42,9 @@ DEFAULT_BLACKLISTED_KEYWORDS: List[str] = [
     "podcast",
 ]
 
-DEFAULT_NEGATIVE_QUERY_TERMS: str = "-sleep -relax -ambient -music -trailer -gameplay"
-
 
 class TopicCategory(Enum):
+
     """Broad documentary topic categories."""
     WILDLIFE = "Wildlife"
     SPACE = "Space"
@@ -135,7 +134,6 @@ class TopicProvider:
     def __init__(self, json_path: Optional[str] = "data/search_topics.json"):
         self.category_map = dict(CATEGORY_TOPICS_MAP)
         self.blacklisted_keywords: Set[str] = set(DEFAULT_BLACKLISTED_KEYWORDS)
-        self.negative_query_terms: str = DEFAULT_NEGATIVE_QUERY_TERMS
 
         if json_path and os.path.exists(json_path):
             self._load_from_json(json_path)
@@ -146,9 +144,8 @@ class TopicProvider:
                 data = json.load(f)
                 if "blacklisted_keywords" in data:
                     self.blacklisted_keywords = {kw.lower() for kw in data["blacklisted_keywords"]}
-                if "negative_query_terms" in data:
-                    self.negative_query_terms = data["negative_query_terms"]
                 if "categories" in data and isinstance(data["categories"], dict):
+
                     cat_map_by_name = {cat.value: cat for cat in TopicCategory}
                     for cat_name, topics in data["categories"].items():
                         if cat_name in cat_map_by_name and isinstance(topics, list):
