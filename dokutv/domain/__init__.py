@@ -4,6 +4,7 @@ Pure domain models, value objects, domain services, and domain exceptions.
 """
 
 from dokutv.domain.models import Video, PlaySlot, ChannelSchedule, PlayHistoryEntry
+from dokutv.domain.overlay import FollowOverlayConfig, OVERLAY_I18N
 from dokutv.domain.topics import (
     DOCUMENTARY_TOPICS,
     TopicCategory,
@@ -22,6 +23,8 @@ __all__ = [
     "PlaySlot",
     "ChannelSchedule",
     "PlayHistoryEntry",
+    "FollowOverlayConfig",
+    "OVERLAY_I18N",
     "DOCUMENTARY_TOPICS",
     "TopicCategory",
     "TopicProvider",
@@ -32,4 +35,5 @@ __all__ = [
     "InvalidVideoError",
     "ScheduleError",
 ]
+
 

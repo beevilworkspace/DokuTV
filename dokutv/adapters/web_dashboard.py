@@ -8,6 +8,10 @@ import logging
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Optional
+from urllib.parse import urlparse, parse_qs
+
+from dokutv.domain.overlay import FollowOverlayConfig
+from dokutv.adapters.follow_overlay_template import render_follow_overlay
 
 logger = logging.getLogger("WebDashboardAdapter")
 
@@ -350,18 +354,43 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path == "/" or self.path == "/index.html":
+        parsed = urlparse(self.path)
+        path = parsed.path
+        params = parse_qs(parsed.query)
+        query_dict = {k: v[0] for k, v in params.items() if v}
+
+        if path == "/" or path == "/index.html":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(HTML_DASHBOARD_TEMPLATE.encode("utf-8"))
-        elif self.path == "/api/status":
+        elif path == "/overlay/follow":
+            self._handle_follow_overlay(query_dict)
+        elif path == "/api/overlay/config":
+            self._handle_overlay_config(query_dict)
+        elif path == "/api/status":
             self._handle_get_status()
-        elif self.path == "/api/skip":
+        elif path == "/api/skip":
             self._handle_skip()
         else:
             self.send_response(404)
             self.end_headers()
+
+    def _handle_follow_overlay(self, query_dict: dict):
+        config = FollowOverlayConfig.from_dict(query_dict)
+        html = render_follow_overlay(config)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(html.encode("utf-8"))
+
+    def _handle_overlay_config(self, query_dict: dict):
+        config = FollowOverlayConfig.from_dict(query_dict)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(config.to_dict(), ensure_ascii=False).encode("utf-8"))
+
 
     def do_POST(self):
         if self.path == "/api/skip":
