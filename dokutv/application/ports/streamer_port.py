@@ -20,6 +20,11 @@ class StreamerPort(Protocol):
         """Stream a video source to broadcast target."""
         ...
 
+    def stop_current_video(self) -> bool:
+        """Stop playback of the currently active video stream."""
+        ...
+
+
 
 @runtime_checkable
 class PersistentStreamerPort(StreamerPort, Protocol):

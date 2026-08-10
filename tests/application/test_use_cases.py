@@ -75,6 +75,20 @@ class TestStreamSingleVideoUseCase(unittest.TestCase):
 
 
 
+class TestSkipCurrentVideoUseCase(unittest.TestCase):
+
+    def test_skip_current_video_execution(self):
+        from dokutv.application.use_cases import SkipCurrentVideoUseCase
+        streamer = FakeStreamerAdapter()
+
+        use_case = SkipCurrentVideoUseCase(streamer_port=streamer)
+        result = use_case.execute()
+
+        self.assertTrue(result)
+        self.assertEqual(streamer.stop_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -6,12 +6,14 @@ from dokutv.domain.models import Video, PlayHistoryEntry
 from dokutv.domain.topics import get_random_topic
 from dokutv.application.use_cases import (
     StreamSingleVideoUseCase,
+    SkipCurrentVideoUseCase,
 )
 from dokutv.adapters import (
     YouTubeCollectorAdapter,
     FFmpegStreamerAdapter,
     TwitchHelixAdapter,
     JsonHistoryStoreAdapter,
+    WebDashboardAdapter,
 )
 from dokutv.infrastructure.app_config import AppConfig
 
@@ -24,11 +26,13 @@ class DokuTVEngine:
         channel_name: str = "DokuTV_EN",
         dry_run: bool = False,
         history_file_path: Optional[str] = None,
+        web_dashboard_port: Optional[int] = None,
     ):
         self.config = AppConfig.from_env(
             channel_name=channel_name,
             dry_run=dry_run,
             history_file_path=history_file_path,
+            web_dashboard_port=web_dashboard_port,
         )
         self.channel_name = self.config.channel_name
         self.dry_run = self.config.dry_run
@@ -38,18 +42,27 @@ class DokuTVEngine:
         self.streamer_adapter = FFmpegStreamerAdapter()
         self.twitch_adapter = TwitchHelixAdapter(channel_name=self.channel_name)
         self.history_adapter = JsonHistoryStoreAdapter(file_path=self.config.history_file_path)
+        self.web_dashboard_adapter = WebDashboardAdapter(engine=self, port=self.config.web_dashboard_port)
 
-        # 2. Inject Adapters into Use Case (Layer 2)
+        # 2. Inject Adapters into Use Cases (Layer 2)
         self.stream_single_video_use_case = StreamSingleVideoUseCase(
             collector_port=self.collector_adapter,
             streamer_port=self.streamer_adapter,
             twitch_port=self.twitch_adapter,
             history_port=self.history_adapter,
         )
+        self.skip_current_video_use_case = SkipCurrentVideoUseCase(
+            streamer_port=self.streamer_adapter
+        )
 
         self.is_running = False
         self.current_video: Optional[Video] = None
         self.failed_video_ids: set = set()
+
+    def skip_current_video(self) -> bool:
+        """Skip the currently playing video to transition to the next candidate."""
+        logger.info("Skip request received on DokuTVEngine.")
+        return self.skip_current_video_use_case.execute()
 
     def run_continuous_stream(self, topic: Optional[str] = None, duration_limit: Optional[int] = None) -> None:
         """Run endless streaming loop: start continuous stream -> stream videos seamlessly -> repeat."""
@@ -61,6 +74,10 @@ class DokuTVEngine:
 
         # Start single persistent RTMP connection to Twitch
         self.streamer_adapter.start_persistent_stream()
+
+        # Start Web Control Dashboard if enabled
+        if self.config.enable_web_dashboard:
+            self.web_dashboard_adapter.start()
 
         try:
             while self.is_running:
@@ -94,6 +111,7 @@ class DokuTVEngine:
         finally:
             self.is_running = False
             self.streamer_adapter.stop_persistent_stream()
+            self.web_dashboard_adapter.stop()
             logger.info("DokuTVEngine continuous loop stopped.")
 
     def get_history(self) -> list:
@@ -109,10 +127,13 @@ class DokuTVEngine:
             "streamer_key_set": bool(self.streamer_adapter.stream_key),
             "persistent_stream_active": bool(self.streamer_adapter.persistent_process),
             "history_count": len(self.get_history()),
+            "web_dashboard_url": f"http://localhost:{self.config.web_dashboard_port}",
         }
 
     def stop(self) -> None:
         logger.info("Stopping DokuTVEngine operations.")
         self.is_running = False
         self.streamer_adapter.stop_persistent_stream()
+        self.web_dashboard_adapter.stop()
+
 

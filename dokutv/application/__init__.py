@@ -10,6 +10,7 @@ from dokutv.application.ports import (
 )
 from dokutv.application.use_cases import (
     StreamSingleVideoUseCase,
+    SkipCurrentVideoUseCase,
 )
 
 __all__ = [
@@ -19,4 +20,6 @@ __all__ = [
     "TwitchPort",
     "ChannelManagementPort",
     "StreamSingleVideoUseCase",
+    "SkipCurrentVideoUseCase",
 ]
+

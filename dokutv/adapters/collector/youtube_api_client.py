@@ -9,6 +9,7 @@ import urllib.error
 from typing import List, Tuple, Optional, Dict
 
 from dokutv.domain.models import Video
+from dokutv.domain.topics import is_valid_documentary
 from dokutv.adapters.collector.collector_config import YouTubeCollectorConfig
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def parse_iso8601_duration(duration_str: str) -> int:
 
 
 class YouTubeApiClient:
-    """Handles HTTP communication with YouTube Data API v3 search endpoints."""
+    """HTTP Client interacting with YouTube Data API v3."""
 
     def __init__(self, config: YouTubeCollectorConfig):
         self.config = config
@@ -79,13 +80,21 @@ class YouTubeApiClient:
         for item in video_items:
             v_id = item["id"]["videoId"]
             snippet = item["snippet"]
+            title = html.unescape(snippet["title"])
+            description = html.unescape(snippet.get("description", ""))
+
+            # Filter out blacklisted sleep/chill/ambient videos
+            if not is_valid_documentary(title, description):
+                logger.info(f"🚫 Filtering out unsuited video '{title}' (matches sleep/chill/relaxing blacklist).")
+                continue
+
             dur_sec = durations.get(v_id, 3600)
             results.append(Video(
                 id=v_id,
-                title=html.unescape(snippet["title"]),
+                title=title,
                 duration_seconds=dur_sec,
                 license="creativeCommon",
-                description=html.unescape(snippet.get("description", "")),
+                description=description,
                 youtube_url=f"https://www.youtube.com/watch?v={v_id}"
             ))
 

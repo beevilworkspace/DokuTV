@@ -25,6 +25,7 @@ from dokutv.adapters.twitch_auth import (
     BrowserLauncher,
 )
 from dokutv.adapters.history_store import JsonHistoryStoreAdapter
+from dokutv.adapters.web_dashboard import WebDashboardAdapter
 from dokutv.adapters.streaming import (
     StreamingConfig,
     StreamingTarget,
@@ -57,6 +58,7 @@ __all__ = [
     "OAuthCallbackServer",
     "BrowserLauncher",
     "JsonHistoryStoreAdapter",
+    "WebDashboardAdapter",
     "StreamingConfig",
     "StreamingTarget",
     "TwitchTarget",
@@ -69,4 +71,5 @@ __all__ = [
     "StreamResult",
     "ResolvedStream",
 ]
+
 

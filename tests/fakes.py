@@ -49,6 +49,7 @@ class FakeStreamerAdapter(StreamerPort):
         self.success_response = success_response
         self.streamed_sources: List[str] = []
         self.streamed_titles: List[str] = []
+        self.stop_count: int = 0
 
     def stream_video(
         self,
@@ -60,6 +61,11 @@ class FakeStreamerAdapter(StreamerPort):
         self.streamed_sources.append(input_source)
         self.streamed_titles.append(video_title)
         return self.success_response
+
+    def stop_current_video(self) -> bool:
+        self.stop_count += 1
+        return True
+
 
 
 class FakeTwitchAdapter(TwitchPort):

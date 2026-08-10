@@ -126,3 +126,15 @@ class StreamSingleVideoUseCase:
             return None, None
 
 
+class SkipCurrentVideoUseCase:
+    """Use Case for interrupting/skipping the currently playing video stream."""
+    def __init__(self, streamer_port: StreamerPort):
+        self.streamer_port = streamer_port
+
+    def execute(self) -> bool:
+        """Execute video skip operation."""
+        logger.info("⚡ [Skip] Requesting skip for currently playing video...")
+        return self.streamer_port.stop_current_video()
+
+
+

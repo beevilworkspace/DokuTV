@@ -45,6 +45,21 @@ class FFmpegStreamerAdapter(StreamerPort):
         self.resolver = resolver or YoutubeUrlResolver(quality_preference=self.config.quality_preference)
         self.command_builder = command_builder or FFmpegCommandBuilder(config=self.config)
         self.session = PersistentStreamSession()
+        self.current_feeder_proc: Optional[subprocess.Popen] = None
+
+    def stop_current_video(self) -> bool:
+        """Stop/skip playback of the currently active video stream."""
+        if self.current_feeder_proc and self.current_feeder_proc.poll() is None:
+            logger.info("Stopping/skipping current video stream process...")
+            try:
+                self.current_feeder_proc.terminate()
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to terminate current feeder process: {e}")
+                return False
+        logger.info("No active video stream process to stop.")
+        return False
+
 
     @property
     def persistent_process(self) -> Optional[subprocess.Popen]:
@@ -181,6 +196,7 @@ class FFmpegStreamerAdapter(StreamerPort):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
             )
+            self.current_feeder_proc = feeder_proc
 
             buf_size = 64 * 1024
             while True:
@@ -201,6 +217,8 @@ class FFmpegStreamerAdapter(StreamerPort):
                 resolved_url=stream_info.video_url,
                 resolved_stream=stream_info,
             )
+        finally:
+            self.current_feeder_proc = None
 
     def _stream_standalone(
         self,
