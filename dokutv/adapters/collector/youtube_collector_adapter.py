@@ -8,6 +8,7 @@ import logging
 from typing import Any, List, Optional, Set
 
 from dokutv.domain.models import Video
+from dokutv.domain.topics import get_random_topic
 from dokutv.application.ports import ContentCollectorPort
 from dokutv.adapters.collector.collector_config import YouTubeCollectorConfig
 from dokutv.adapters.collector.fallback_playlist_store import FallbackPlaylistStore
@@ -47,7 +48,22 @@ class YouTubeCollectorAdapter(ContentCollectorPort):
             if video.id not in exclude_set:
                 return video
 
-        # Fallback to curated list if all search candidates are excluded
+        # Retry online search with alternative categories on YouTube API before resorting to fallback_store
+        if self.api_client.is_api_key_valid():
+            logger.info(f"No non-excluded CC results for '{query}'. Retrying online search across alternative categories...")
+            for _ in range(4):
+                alt_topic = get_random_topic()
+                try:
+                    alt_candidates = self.api_client.search_videos(alt_topic, max_results=30)
+                    for video in alt_candidates:
+                        if video.id not in exclude_set:
+                            logger.info(f"✅ Found online CC video '{video.title}' from alternative category topic '{alt_topic}'.")
+                            return video
+                except Exception as e:
+                    logger.warning(f"Alternative category search for '{alt_topic}' failed: {e}")
+
+        # Fallback to curated list ONLY if online API retries across categories return nothing
+        logger.info("Using curated Creative Commons / Public Domain documentary catalog as last resort.")
         curated = self.fallback_store.load_curated_videos()
         for video in curated:
             if video.id not in exclude_set:
@@ -56,17 +72,17 @@ class YouTubeCollectorAdapter(ContentCollectorPort):
         return curated[0] if curated else None
 
     def search_cc_documentaries(self, query: str = "documentary", max_results: int = 30) -> List[Video]:
-        """Search online API for documentaries or fall back to curated catalog."""
+        """Search online API for documentaries."""
         if self.api_client.is_api_key_valid():
             try:
                 results = self.api_client.search_videos(query, max_results)
                 if results:
                     return results
             except Exception as e:
-                logger.error(f"YouTube API Request failed: {e}. Falling back to curated catalog.")
+                logger.error(f"YouTube API Request failed: {e}.")
 
-        logger.info("Using curated Creative Commons / Public Domain documentary catalog.")
-        return self.fallback_store.load_curated_videos()
+        return []
+
 
     def _normalize_exclude_ids(self, exclude_ids: Optional[Any]) -> Set[str]:
         """Convert string, set, list, or tuple exclude_ids parameter into a set."""

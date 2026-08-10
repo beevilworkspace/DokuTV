@@ -12,8 +12,8 @@ from typing import List, Optional
 class StreamingConfig:
     """Configuration options for FFmpeg streaming and URL resolving."""
     video_preset: str = "veryfast"
-    video_maxrate: str = "6000k"
-    buffer_size: str = "12000k"
+    video_maxrate: str = "4500k"
+    buffer_size: str = "9000k"
     audio_bitrate: str = "160k"
     audio_sample_rate: str = "44100"
     pixel_format: str = "yuv420p"
@@ -33,7 +33,15 @@ class StreamingConfig:
             "cookies.txt" if os.path.exists("cookies.txt") else None
         )
         cookies_browser = os.getenv("YOUTUBE_COOKIES_BROWSER")
+        maxrate = os.getenv("VIDEO_MAXRATE", "4500k")
+        bufsize = os.getenv("BUFFER_SIZE", "9000k")
+        preset = os.getenv("VIDEO_PRESET", "veryfast")
+
         return cls(
+            video_preset=preset,
+            video_maxrate=maxrate,
+            buffer_size=bufsize,
             youtube_cookies_file=cookies_file,
             youtube_cookies_browser=cookies_browser,
         )
+
