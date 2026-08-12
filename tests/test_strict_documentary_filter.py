@@ -120,6 +120,21 @@ class TestStrictDocumentaryFilter(unittest.TestCase):
         channel_names = [c.get("name") for c in channels]
         self.assertIn("DW Documentary", channel_names)
 
+    @patch("dokutv.adapters.collector.youtube_api_client.urllib.request.urlopen")
+    def test_search_videos_includes_relevance_language_en(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json_dumps({"items": []}).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        config = YouTubeCollectorConfig(api_key="AIzaSyTestKeyValid123456789")
+        client = YouTubeApiClient(config)
+        client.search_videos("wildlife")
+
+        # Inspect request arguments passed to urlopen
+        called_req = mock_urlopen.call_args[0][0]
+        self.assertIn("relevanceLanguage=en", called_req.full_url)
+
 
 def json_dumps(obj):
     import json
